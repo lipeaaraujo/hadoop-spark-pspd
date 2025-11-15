@@ -1,0 +1,57 @@
+services:
+  hadoop-master:
+    image: ubuntu:24.04
+    container_name: hadoop-master
+    hostname: hadoop-master
+    privileged: true
+    tty: true
+    stdin_open: true
+    networks:
+      hadoop-network:
+        ipv4_address: 172.20.0.10
+    volumes:
+      - hadoop_master_data:/hadoop-data
+      - ./shared:/shared
+    command: /bin/bash -c "sleep infinity"
+
+  hadoop-slave1:
+    image: ubuntu:24.04
+    container_name: hadoop-slave1
+    hostname: hadoop-slave1
+    privileged: true
+    tty: true
+    stdin_open: true
+    networks:
+      hadoop-network:
+        ipv4_address: 172.20.0.11
+    volumes:
+      - hadoop_slave1_data:/hadoop-data
+      - ./shared:/shared
+    command: /bin/bash -c "sleep infinity"
+
+  hadoop-slave2:
+    image: ubuntu:24.04
+    container_name: hadoop-slave2
+    hostname: hadoop-slave2
+    privileged: true
+    tty: true
+    stdin_open: true
+    networks:
+      hadoop-network:
+        ipv4_address: 172.20.0.12
+    volumes:
+      - hadoop_slave2_data:/hadoop-data
+      - ./shared:/shared
+    command: /bin/bash -c "sleep infinity"
+
+networks:
+  hadoop-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  hadoop_master_data:
+  hadoop_slave1_data:
+  hadoop_slave2_data:
