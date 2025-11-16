@@ -183,6 +183,8 @@ O experimento com Spark focou no processamento de streaming , com o objetivo de 
 
 No experimento com Spark, o foco foi o processamento de streaming em tempo real,com o objetivo de coletar dados de uma rede social . A arquitetura da solução, foi implementada para atender ao requisito de usar uma rede social como fonte de dados (Discord). Foi desenvolvido um bot para o Discord que atua como produtor, capturando mensagens de um canal e enviando-as diretamente para um tópico Kafka (canalinput). Em paralelo, uma aplicação Spark Structured Streaming foi configurada para consumir os dados desse tópico. A lógica do Spark processa o stream, aplica as transformações para contagem de palavras (WordCount) agrupadas em janelas de tempo, e prepara os resultados agregados em formato JSON para um tópico de saída (canaloutput).
 
+Embora a lógica completa deste pipeline de dados esteja implementada no notebook, a execução no ambiente local foi comprometida por desafios de infraestrutura.A etapa final, referente à substituição da saída por um dashboard gráfico com ElasticSearch e Kibana, não foi implementada, restando o pipeline com a saída dos dados processados de volta ao Kafka.
+
 Em suma, o laboratório consolidou os conceitos teóricos da disciplina, demonstrando a força do Hadoop para processamento batch robusto e a velocidade e flexibilidade do Spark para análises em tempo real
 
 
