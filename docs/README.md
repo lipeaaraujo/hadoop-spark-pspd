@@ -172,7 +172,86 @@ docker exec -it hadoop-master bash -c "start-dfs.sh && start-yarn.sh"
 ```
 
 ### 2.2 Testes de Comportamento do Framework
+A etapa de experimentação deste trabalho focou na avaliação prática da resiliência e tolerância a falhas do cluster Hadoop implementado. Para este fim, foi desenhado um cenário de teste que consiste na execução do job WordCount sobre o HDFS, concomitantemente à injeção programada de falhas nos contêineres de serviço. Todo o processo foi automatizado e orquestrado pelo script cluster/tools/run_fault_tests.py.
 
+O fluxo experimental consistiu nas seguintes etapas:
+
+(i) Preparação do dataset de entrada no HDFS, no diretório `/datasets/wordcount`.
+
+(ii) Submissão da aplicação `WordCount` via `hadoop jar`.
+
+(iii) Monitoramento periódico do progresso do job, com registro de amostras e eventos em formato `.jsonl` no diretório `cluster/shared/reports/`.
+(iv) Injeção de falhas (via comandos `docker stop/start`) conforme um cronograma pré-definido por linha de comando.
+
+
+### Escopo dos Eventos de Falha Avaliados
+
+O cronograma de falhas padrão incluiu:
+
+1.  Interrupção do `hadoop-slave1` após 120 segundos, por um período de 60 segundos.
+2.  Interrupção do `hadoop-slave2` após 420 segundos, por um período de 60 segundos.
+3.  (Opcional) Interrupção do `hadoop-master` após 840 segundos, por 60 segundos. Este evento requer considerações especiais, discutidas abaixo.
+
+### Resultados Observados
+
+* **Falhas em Nós de Trabalho (Slaves):** A interrupção de `DataNodes`/`NodeManagers` foi tolerada pelo sistema. O job prosseguiu, e o YARN automaticamente re-executou *tasks* perdidas e realocou contêineres nos nós restantes. Observou-se uma degradação no *throughput* durante os períodos de indisponibilidade, resultando em um aumento no tempo total de execução (TTE). Os arquivos de log `.jsonl` permitiram correlacionar com precisão os picos de latência e reexecuções de *tasks* com os intervalos de falha injetados.
+
+* **Falha no Nó Mestre (Master) durante a Execução:** A interrupção do `hadoop-master` resultou em falha catastrófica do job. Os logs de execução (ex: `fault_test_20251115-195241.job.log`) indicaram que a aplicação `WordCount` permaneceu estagnada (ex: `map 0% reduce 0%`) ou falhou devido a erros de comunicação IPC. Isso ocorre pois, neste *setup*, o processo cliente (o `hadoop jar`) é executado dentro do próprio contêiner mestre. Ao interromper o contêiner, o processo cliente é terminado, o job é perdido e o sumário final (`.summary.json`) não é gerado. Mesmo após a reinicialização do mestre, os serviços (ResourceManager/NameNode) não retomaram a aplicação.
+
+* **Falhas na Preparação do Dataset:** Em algumas execuções, o comando de verificação `hdfs dfs -test -d /datasets/wordcount` falhou. As causas identificadas foram: (a) os serviços HDFS/YARN ainda estavam em processo de inicialização; (b) o diretório local de dados (`./shared/wordcount-data`) estava vazio; ou (c) o volume do Docker (`./shared`) não foi montado corretamente.
+
+### Inferências Técnicas
+
+* **Resiliência dos Nós de Trabalho:** A arquitetura demonstra tolerância a falhas em DataNodes e NodeManagers. Isso é atribuído ao fator de replicação do HDFS (garantindo a disponibilidade dos dados) e à capacidade do YARN de gerenciar e realocar *tasks*.
+* **Ponto Único de Falha (SPOF):** O NameNode e o ResourceManager permanecem como pontos únicos de falha nesta configuração *singleton*. A falha do nó mestre, que também hospeda o cliente do job, compromete toda a execução.
+* **Eficácia da Observabilidade:** Os artefatos gerados (`.job.log` e `.jsonl`) provaram ser suficientes para a observabilidade do sistema. Em `fault_test_20251115-195241.job.log`, foi possível correlacionar o avanço do job (aprox. 32%) com falhas subsequentes nos *reducers* (Shuffle$ShuffleError, Exceeded MAX_FAILED_UNIQUE_FETCHES), que ocorreram imediatamente após a indisponibilidade do contêiner que servia os *outputs* intermediários.
+
+---
+
+### Impacto das falhas programadas
+
+| Evento | Observação | Consequência |
+|--------|------------|--------------|
+| `stop hadoop-slave1` aos 120 s | Interrupção das *tasks* hospedadas no contêiner. | Reexecução automática dos mapas afetados e queda momentânea para ~15 % de progresso. |
+| `stop hadoop-slave2` aos 420 s | Nova perda de dados intermediários em produção. | Série de ShuffleError e reinicialização de reducers; curva de progresso ficou “serrilhada”. |
+| (Opcional) `stop hadoop-master` | Teste não concluído com sucesso. | Job abortado porque o cliente hadoop jar reside no master; não há *failover* configurado. |
+
+### Métricas de tempo e custo de recuperação
+
+* Tempo médio para o YARN detectar a queda de um NodeManager: ~10 s (com base nas diferenças `elapsed_s` entre eventos de parada e as primeiras linhas de reexecução).
+* Janela de recuperação completa após cada falha de *slave*: 60 – 90 s, contabilizando o tempo para o contêiner voltar, registrar-se no ResourceManager e liberar recursos para novas *tasks*.
+* Overhead acumulado: os jobs que normalmente terminam em ~8 min levaram ~15 min com as duas falhas planejadas, representando um acréscimo de ~90 % no TTE.
+
+#### 2.2.1 Preparação dos Textos de Entrada
+
+Os arquivos utilizados nos testes são gerados por dois *scripts* shell disponíveis em cluster/shared/:
+
+1. `download_gutenberg_corpus.sh`: baixa obras públicas do Project Gutenberg.
+2. `generate_wordcount_data.sh`: cria textos sintéticos grandes para sobrecarregar o HDFS.
+
+Como ambos requerem utilitários POSIX (`bash`, `wget/curl`, `awk`, `unzip`), recomendamos executá-los dentro do contêiner hadoop-master (ou em qualquer host Linux compatível) seguindo os passos abaixo:
+
+```powershell
+cd .\cluster
+docker exec -it hadoop-master bash
+```
+
+Dentro do *shell* do contêiner:
+
+```bash
+cd /shared
+chmod +x download_gutenberg_corpus.sh generate_wordcount_data.sh
+
+# 1) Baixar livros do Gutenberg (personalize BOOK_IDS, OVERWRITE ou DATA_DIR se necessário)
+BOOK_IDS="11 84 1342 1661" OVERWRITE=0 ./download_gutenberg_corpus.sh
+
+# 2) Gerar lotes sintéticos (ajuste FILES/LINES_PER_FILE para calibrar o volume)
+FILES=8 LINES_PER_FILE=2000000 ./generate_wordcount_data.sh
+
+exit
+```
+
+---
 ## 3. Experimento com Spark
 
 O experimento com Apache Spark, foi desenvolvido para atender aos requisitos de processamento de streaming definidos no item B2 do documento de especificação. Conforme implementado no notebook, o sistema de entrada de dados foi substituído por uma fonte em tempo real, utilizando a API de uma rede social. Para isso, um bot do Discord foi configurado para atuar como um produtor Kafka, capturando ativamente as mensagens enviadas por usuários em um canal e publicando-as, em tempo real, no tópico Kafka de entrada (canalinput). Uma aplicação Spark Structured Streaming é então conectada a este tópico, consumindo o fluxo de mensagens à medida que elas chegam. Dentro do Spark, um pipeline de transformação é aplicado: as mensagens de texto são primeiramente segmentadas em palavras individuais (split), distribuídas em linhas distintas e padronizadas (convertidas para maiúsculas). A principal lógica de negócio, a contabilização de palavras (WordCount), é executada de forma contínua sobre esses dados. Para garantir o processamento eficiente e a gestão de dados que podem chegar com atraso, a agregação é feita utilizando janelas de tempo (window). Finalmente, os resultados dessa contabilização (palavra, contagem e janela de tempo) são formatados em JSON e enviados para o tópico Kafka de saída (canaloutput). Embora o pipeline de dados desde a captura no Discord até o processamento no Spark e a saída no Kafka esteja funcional, a etapa final de visualização gráfica com ElasticSearch e Kibana, conforme sugerido nas instruções, não foi implementada, restando os dados processados disponíveis no tópico de saída.
