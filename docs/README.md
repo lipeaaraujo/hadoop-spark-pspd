@@ -176,6 +176,13 @@ docker exec -it hadoop-master bash -c "start-dfs.sh && start-yarn.sh"
 ## 3. Experimento com Spark
 
 ## 4. Conclusão
+Neste rela´torio, exploramos na prática as arquiteturas e os casos de uso dos frameworks Apache Hadoop e Apache Spark, fundamentais no ecossistema de Big Data. Os experimentos permitiram contrastar o processamento em lote (batch) do Hadoop com o processamento em streaming do Spark.
+No experimento com Hadoop, a configuração do cluster com um nó mestre e dois escravos foi realizada utilizando contêineres Docker, conforme detalhado na arquitetura. Durante os testes de tolerância a falhas , . Uma das principais vantagens foi a robustez do HDFS para grandes volumes de dados. Uma das desvantagens identificadas a complexidade da configuração inicial dos arquivos XML  e o overhead do MapReduce.
+
+O experimento com Spark focou no processamento de streaming , com o objetivo de coletar dados de uma rede social (Discord) e gerar uma saída gráfica.
+
+Em suma, o laboratório consolidou os conceitos teóricos da disciplina, demonstrando a força do Hadoop para processamento batch robusto e a velocidade e flexibilidade do Spark para análises em tempo real
+
 
 | Matrícula | Nome | Contribuições | Autoavaliação (0-10) |
 |-----------|------|---------------|-----------------------|
